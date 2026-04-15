@@ -428,13 +428,13 @@ var homeTpl = template.Must(template.New("home").Funcs(template.FuncMap{
 			<td class="mono">{{.ClientAddr}}</td>
 			<td class="mono">{{.ConnID}}</td>
 			<td class="mono">{{.Since.Format "2006-01-02 15:04:05"}}</td>
-			<td class="mono" title="{{.L.RateColTitle}}">{{.L.RateIn}} {{fmtBps .RateRxBps}}<br>{{.L.RateOut}} {{fmtBps .RateTxBps}}</td>
-			<td class="mono">{{.L.TrafficIn}} {{fmtBytes .BytesRx}}<br>{{.L.TrafficOut}} {{fmtBytes .BytesTx}}</td>
+			<td class="mono" title="{{$.L.RateColTitle}}">{{$.L.RateIn}} {{fmtBps .RateRxBps}}<br>{{$.L.RateOut}} {{fmtBps .RateTxBps}}</td>
+			<td class="mono">{{$.L.TrafficIn}} {{fmtBytes .BytesRx}}<br>{{$.L.TrafficOut}} {{fmtBytes .BytesTx}}</td>
 			<td>
 				<form method="post" action="/session/disconnect" style="margin:0" onsubmit="return confirm({{jsQuote $.L.ConfirmDisconnect}});">
 					<input type="hidden" name="conn_id" value="{{.ConnID}}">
 					<input type="hidden" name="redir" value="{{$.RedirQuery}}">
-					<button type="submit">{{.L.BtnDisconnect}}</button>
+					<button type="submit">{{$.L.BtnDisconnect}}</button>
 				</form>
 			</td>
 		</tr>
@@ -461,21 +461,21 @@ var homeTpl = template.Must(template.New("home").Funcs(template.FuncMap{
 			<td class="mono">{{range $i, $p := .ForwardPorts}}{{if $i}}, {{end}}{{$p}}{{else}}<em>{{$.L.NoPorts}}</em>{{end}}</td>
 			<td>
 				<details>
-					<summary>{{.L.EditSummary}}</summary>
+					<summary>{{$.L.EditSummary}}</summary>
 					<form method="post" action="/user/update" style="margin-top:.5rem;">
 						<input type="hidden" name="id" value="{{.ID}}">
-						<label>{{.L.LabelNewPwd}}</label>
+						<label>{{$.L.LabelNewPwd}}</label>
 						<input type="password" name="password" autocomplete="new-password">
-						<label>{{.L.LabelFwdPorts}}</label>
+						<label>{{$.L.LabelFwdPorts}}</label>
 						<textarea name="forward_ports">{{range $i, $p := .ForwardPorts}}{{if $i}},{{end}}{{$p}}{{end}}</textarea>
-						<button type="submit">{{.L.Save}}</button>
+						<button type="submit">{{$.L.Save}}</button>
 					</form>
 				</details>
 			</td>
 			<td>
-				<form method="post" action="/user/delete" onsubmit="return confirm({{jsQuote (printf .L.ConfirmDelete .Username)}});">
+				<form method="post" action="/user/delete" onsubmit="return confirm({{jsQuote (printf $.L.ConfirmDelete .Username)}});">
 					<input type="hidden" name="id" value="{{.ID}}">
-					<button type="submit">{{.L.Delete}}</button>
+					<button type="submit">{{$.L.Delete}}</button>
 				</form>
 			</td>
 		</tr>
