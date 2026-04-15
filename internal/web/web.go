@@ -13,6 +13,14 @@ import (
 	"ssh_forward/internal/store"
 )
 
+func jsQuote(s string) template.HTML {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return template.HTML(`""`)
+	}
+	return template.HTML(b)
+}
+
 const listPageSize = 10
 
 type pagerInfo struct {
@@ -66,14 +74,14 @@ func Serve(addr, webUser, webPass string, st *store.Store, reg *registry.Registr
 			ForwardPorts:  parsePortField(r.FormValue("forward_ports")),
 		}
 		if strings.TrimSpace(u.Username) == "" || u.PasswordPlain == "" {
-			http.Redirect(w, r, "/?err=missing", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"missing"}})
 			return
 		}
 		if err := st.CreateUser(u); err != nil {
-			http.Redirect(w, r, "/?err=create", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"create"}})
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		homeRedirect(w, r, nil)
 	})
 	mux.HandleFunc("/user/update", func(w http.ResponseWriter, r *http.Request) {
 		if !checkAuth(w, r, webUser, webPass) {
@@ -89,7 +97,7 @@ func Serve(addr, webUser, webPass string, st *store.Store, reg *registry.Registr
 		}
 		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 		if err != nil {
-			http.Redirect(w, r, "/?err=id", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"id"}})
 			return
 		}
 		u := store.User{
@@ -100,10 +108,10 @@ func Serve(addr, webUser, webPass string, st *store.Store, reg *registry.Registr
 			u.PasswordPlain = p
 		}
 		if err := st.UpdateUser(u); err != nil {
-			http.Redirect(w, r, "/?err=update", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"update"}})
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		homeRedirect(w, r, nil)
 	})
 	mux.HandleFunc("/user/delete", func(w http.ResponseWriter, r *http.Request) {
 		if !checkAuth(w, r, webUser, webPass) {
@@ -119,11 +127,11 @@ func Serve(addr, webUser, webPass string, st *store.Store, reg *registry.Registr
 		}
 		id, err := strconv.ParseInt(r.FormValue("id"), 10, 64)
 		if err != nil {
-			http.Redirect(w, r, "/?err=id", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"id"}})
 			return
 		}
 		_ = st.DeleteUser(id)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		homeRedirect(w, r, nil)
 	})
 	mux.HandleFunc("/session/disconnect", func(w http.ResponseWriter, r *http.Request) {
 		if !checkAuth(w, r, webUser, webPass) {
@@ -139,19 +147,14 @@ func Serve(addr, webUser, webPass string, st *store.Store, reg *registry.Registr
 		}
 		id, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("conn_id")), 10, 64)
 		if err != nil || id < 1 {
-			http.Redirect(w, r, "/?err=badconn", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"badconn"}})
 			return
 		}
 		if !reg.DisconnectSession(id) {
-			http.Redirect(w, r, "/?err=disconnect_gone", http.StatusSeeOther)
+			homeRedirect(w, r, url.Values{"err": {"disconnect_gone"}})
 			return
 		}
-		redir := strings.TrimSpace(r.FormValue("redir"))
-		loc := "/?ok=disconnect"
-		if redir != "" {
-			loc = "/?ok=disconnect&"+redir
-		}
-		http.Redirect(w, r, loc, http.StatusSeeOther)
+		redirectAfterDisconnect(w, r, strings.TrimSpace(r.FormValue("redir")))
 	})
 	return http.ListenAndServe(addr, mux)
 }
@@ -188,12 +191,16 @@ func pageHome(w http.ResponseWriter, r *http.Request, st *store.Store, reg *regi
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	lang := applyLangCookie(w, r)
+	L := localeFor(lang)
+
 	users, err := st.ListUsers()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	q := r.URL.Query()
+	q := cloneQuery(r.URL.Query())
+	q.Set("lang", lang)
 	upage := parsePage(q.Get("upage"), 1)
 	apage := parsePage(q.Get("apage"), 1)
 
@@ -210,24 +217,45 @@ func pageHome(w http.ResponseWriter, r *http.Request, st *store.Store, reg *regi
 		activeSlice, aPages, aTotal = paginateActive(allActive, apage)
 	}
 
+	switchZH, switchEN := buildLangSwitchURLs(q)
+	errMsg := errMessage(L, q.Get("err"))
+	okMsg := ""
+	if q.Get("ok") == "disconnect" {
+		okMsg = L.OkDisconnect
+	}
+
 	data := struct {
-		Users       []store.User
-		Active      []registry.RemoteForward
-		Err         string
-		OK          string
-		RedirQuery  string
-		PageSize    int
-		UserPager   pagerInfo
-		ActivePager pagerInfo
+		L            uiLocale
+		HintMain     template.HTML
+		HintWarn     template.HTML
+		HintActive   template.HTML
+		HintNeedPort template.HTML
+		Users        []store.User
+		Active       []registry.RemoteForward
+		ErrMsg       string
+		OKMsg        string
+		RedirQuery   string
+		PageSize     int
+		UserPager    pagerInfo
+		ActivePager  pagerInfo
+		SwitchZH     string
+		SwitchEN     string
 	}{
-		Users:       userSlice,
-		Active:      activeSlice,
-		Err:         q.Get("err"),
-		OK:          q.Get("ok"),
-		RedirQuery:  r.URL.RawQuery,
-		PageSize:    listPageSize,
-		UserPager:   buildPager(r.URL.Query(), "upage", upage, uPages, uTotal),
-		ActivePager: buildPager(r.URL.Query(), "apage", apage, aPages, aTotal),
+		L:            L,
+		HintMain:     template.HTML(L.HintMainHTML),
+		HintWarn:     template.HTML(L.HintWarnHTML),
+		HintActive:   template.HTML(L.HintActiveHTML),
+		HintNeedPort: template.HTML(L.HintNeedPort),
+		Users:        userSlice,
+		Active:       activeSlice,
+		ErrMsg:       errMsg,
+		OKMsg:        okMsg,
+		RedirQuery:   q.Encode(),
+		PageSize:     listPageSize,
+		UserPager:    buildPager(q, "upage", upage, uPages, uTotal),
+		ActivePager:  buildPager(q, "apage", apage, aPages, aTotal),
+		SwitchZH:     switchZH,
+		SwitchEN:     switchEN,
 	}
 	if err := homeTpl.Execute(w, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -349,15 +377,17 @@ func formatBps(n int64) string {
 var homeTpl = template.Must(template.New("home").Funcs(template.FuncMap{
 	"fmtBytes": formatBytes,
 	"fmtBps":   formatBps,
+	"jsQuote":  jsQuote,
 }).Parse(`<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="{{.L.HTMLLang}}">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>SSH 转发管理</title>
+	<title>{{.L.Title}}</title>
 	<style>
 		body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
-		h1 { font-size: 1.4rem; }
+		.hdr { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+		h1 { font-size: 1.4rem; margin: 0; }
 		h2 { font-size: 1.1rem; margin-top: 2rem; }
 		table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 		th, td { border: 1px solid #ccc; padding: 0.5rem 0.6rem; text-align: left; }
@@ -373,19 +403,24 @@ var homeTpl = template.Must(template.New("home").Funcs(template.FuncMap{
 		.pager { font-size: 0.85rem; margin: 0.5rem 0 0; color: #444; }
 		.pager a { margin: 0 0.25rem; }
 		.pager .disabled { color: #999; }
+		.lang-switch { font-size: 0.9rem; margin: 0; }
+		.lang-switch a { color: #0b57d0; }
 	</style>
 </head>
 <body>
-	<h1>SSH 端口转发服务</h1>
-	<p class="hint">本服务<strong>仅支持</strong>远程转发 <code>ssh -R</code>（不支持 <code>-L</code>）。下方「允许的远程转发端口」即 <code>-R 端口:目标:目标端口</code> 中服务端监听端口，须与此处登记一致。</p>
-	<p class="hint warn">列表中的密码以<strong>明文</strong>写入数据库便于查看；请勿对公网暴露管理页，勿提交 <code>app.db</code>。</p>
-	{{if .Err}}<p class="err">操作未完成（错误代码：{{.Err}}）</p>{{end}}
-	{{if eq .OK "disconnect"}}<p class="okmsg">已断开该客户端的 SSH 连接（其全部远程转发已结束）。</p>{{end}}
+	<div class="hdr">
+		<h1>{{.L.Heading}}</h1>
+		<p class="lang-switch"><a href="{{.SwitchZH}}">{{.L.LangZH}}</a> · <a href="{{.SwitchEN}}">{{.L.LangEN}}</a></p>
+	</div>
+	<p class="hint">{{.HintMain}}</p>
+	<p class="hint warn">{{.HintWarn}}</p>
+	{{if .ErrMsg}}<p class="err">{{.ErrMsg}}</p>{{end}}
+	{{if .OKMsg}}<p class="okmsg">{{.OKMsg}}</p>{{end}}
 
-	<h2>当前远程转发监听（-R）</h2>
-	<p class="hint">「入/出」相对<strong>本机监听端口</strong>上的流量：入=外部连接写入，出=写回外部。当前网速为最近 1 秒平均；本会话流量为当前 SSH 连接上该会话累计。</p>
+	<h2>{{.L.H2Active}}</h2>
+	<p class="hint">{{.HintActive}}</p>
 	<table>
-		<tr><th>SSH 用户</th><th>监听端口</th><th>客户端地址</th><th>会话 ID</th><th>开始时间</th><th>当前网速</th><th>本会话流量</th><th>操作</th></tr>
+		<tr><th>{{.L.ThUser}}</th><th>{{.L.ThListenPort}}</th><th>{{.L.ThClientAddr}}</th><th>{{.L.ThConnID}}</th><th>{{.L.ThSince}}</th><th>{{.L.ThRate}}</th><th>{{.L.ThTraffic}}</th><th>{{.L.ThAction}}</th></tr>
 		{{range .Active}}
 		<tr>
 			<td>{{.Username}}</td>
@@ -393,79 +428,79 @@ var homeTpl = template.Must(template.New("home").Funcs(template.FuncMap{
 			<td class="mono">{{.ClientAddr}}</td>
 			<td class="mono">{{.ConnID}}</td>
 			<td class="mono">{{.Since.Format "2006-01-02 15:04:05"}}</td>
-			<td class="mono" title="入站=外部→SSH，出站=SSH→外部">入 {{fmtBps .RateRxBps}}<br>出 {{fmtBps .RateTxBps}}</td>
-			<td class="mono">入 {{fmtBytes .BytesRx}}<br>出 {{fmtBytes .BytesTx}}</td>
+			<td class="mono" title="{{.L.RateColTitle}}">{{.L.RateIn}} {{fmtBps .RateRxBps}}<br>{{.L.RateOut}} {{fmtBps .RateTxBps}}</td>
+			<td class="mono">{{.L.TrafficIn}} {{fmtBytes .BytesRx}}<br>{{.L.TrafficOut}} {{fmtBytes .BytesTx}}</td>
 			<td>
-				<form method="post" action="/session/disconnect" style="margin:0" onsubmit="return confirm('断开此 SSH 客户端？同一客户端上所有 -R 将一并结束。');">
+				<form method="post" action="/session/disconnect" style="margin:0" onsubmit="return confirm({{jsQuote $.L.ConfirmDisconnect}});">
 					<input type="hidden" name="conn_id" value="{{.ConnID}}">
 					<input type="hidden" name="redir" value="{{$.RedirQuery}}">
-					<button type="submit">断开</button>
+					<button type="submit">{{.L.BtnDisconnect}}</button>
 				</form>
 			</td>
 		</tr>
 		{{else}}
-		<tr><td colspan="8">暂无活跃监听</td></tr>
+		<tr><td colspan="8">{{.L.NoActive}}</td></tr>
 		{{end}}
 	</table>
 	{{if .ActivePager.Show}}
-	<p class="pager">共 {{.ActivePager.Total}} 条；每页 {{.PageSize}} 条。
-		{{if .ActivePager.PrevURL}}<a href="{{.ActivePager.PrevURL}}">上一页</a>{{else}}<span class="disabled">上一页</span>{{end}}
-		第 {{.ActivePager.Page}} / {{.ActivePager.TotalPages}} 页
-		{{if .ActivePager.NextURL}}<a href="{{.ActivePager.NextURL}}">下一页</a>{{else}}<span class="disabled">下一页</span>{{end}}
+	<p class="pager">{{printf .L.PagerTotalActive .ActivePager.Total}}；{{printf .L.PagerPerPage .PageSize}}。
+		{{if .ActivePager.PrevURL}}<a href="{{.ActivePager.PrevURL}}">{{.L.PrevPage}}</a>{{else}}<span class="disabled">{{.L.PrevPage}}</span>{{end}}
+		{{printf .L.PageNofM .ActivePager.Page .ActivePager.TotalPages}}
+		{{if .ActivePager.NextURL}}<a href="{{.ActivePager.NextURL}}">{{.L.NextPage}}</a>{{else}}<span class="disabled">{{.L.NextPage}}</span>{{end}}
 	</p>
 	{{end}}
 
-	<h2>SSH 账号与允许端口</h2>
+	<h2>{{.L.H2Users}}</h2>
 	<table>
-		<tr><th>用户</th><th>密码</th><th>历史流量汇总</th><th>允许的远程转发端口</th><th>更新</th><th>删除</th></tr>
+		<tr><th>{{.L.ThUserAccount}}</th><th>{{.L.ThPassword}}</th><th>{{.L.ThTrafficSum}}</th><th>{{.L.ThFwdPorts}}</th><th>{{.L.ThEdit}}</th><th>{{.L.ThDelete}}</th></tr>
 		{{range .Users}}
 		<tr>
 			<td class="mono">{{.Username}}</td>
-			<td class="mono">{{if .StoredPassword}}{{.StoredPassword}}{{else}}<em title="在该功能上线前创建的用户，或从未通过本页保存过密码">—</em>{{end}}</td>
-			<td class="mono" title="历次 SSH 会话结束后累计（按转发套接字统计）">入 {{fmtBytes .TrafficRxTotal}}<br>出 {{fmtBytes .TrafficTxTotal}}</td>
-			<td class="mono">{{range $i, $p := .ForwardPorts}}{{if $i}}, {{end}}{{$p}}{{else}}<em>无（禁止 -R）</em>{{end}}</td>
+			<td class="mono">{{if .StoredPassword}}{{.StoredPassword}}{{else}}<em title="{{$.L.NoPasswordTitle}}">—</em>{{end}}</td>
+			<td class="mono" title="{{$.L.TrafficSumTitle}}">{{$.L.TrafficIn}} {{fmtBytes .TrafficRxTotal}}<br>{{$.L.TrafficOut}} {{fmtBytes .TrafficTxTotal}}</td>
+			<td class="mono">{{range $i, $p := .ForwardPorts}}{{if $i}}, {{end}}{{$p}}{{else}}<em>{{$.L.NoPorts}}</em>{{end}}</td>
 			<td>
 				<details>
-					<summary>编辑</summary>
+					<summary>{{.L.EditSummary}}</summary>
 					<form method="post" action="/user/update" style="margin-top:.5rem;">
 						<input type="hidden" name="id" value="{{.ID}}">
-						<label>新密码（留空则不修改）</label>
+						<label>{{.L.LabelNewPwd}}</label>
 						<input type="password" name="password" autocomplete="new-password">
-						<label>允许的远程转发端口（逗号分隔）</label>
+						<label>{{.L.LabelFwdPorts}}</label>
 						<textarea name="forward_ports">{{range $i, $p := .ForwardPorts}}{{if $i}},{{end}}{{$p}}{{end}}</textarea>
-						<button type="submit">保存</button>
+						<button type="submit">{{.L.Save}}</button>
 					</form>
 				</details>
 			</td>
 			<td>
-				<form method="post" action="/user/delete" onsubmit="return confirm('删除用户 {{.Username}}？');">
+				<form method="post" action="/user/delete" onsubmit="return confirm({{jsQuote (printf .L.ConfirmDelete .Username)}});">
 					<input type="hidden" name="id" value="{{.ID}}">
-					<button type="submit">删除</button>
+					<button type="submit">{{.L.Delete}}</button>
 				</form>
 			</td>
 		</tr>
 		{{else}}
-		<tr><td colspan="6">尚无用户，请在下方添加</td></tr>
+		<tr><td colspan="6">{{.L.NoUsersYet}}</td></tr>
 		{{end}}
 	</table>
 	{{if .UserPager.Show}}
-	<p class="pager">共 {{.UserPager.Total}} 个用户；每页 {{.PageSize}} 条。
-		{{if .UserPager.PrevURL}}<a href="{{.UserPager.PrevURL}}">上一页</a>{{else}}<span class="disabled">上一页</span>{{end}}
-		第 {{.UserPager.Page}} / {{.UserPager.TotalPages}} 页
-		{{if .UserPager.NextURL}}<a href="{{.UserPager.NextURL}}">下一页</a>{{else}}<span class="disabled">下一页</span>{{end}}
+	<p class="pager">{{printf .L.PagerTotalUsers .UserPager.Total}}；{{printf .L.PagerPerPage .PageSize}}。
+		{{if .UserPager.PrevURL}}<a href="{{.UserPager.PrevURL}}">{{.L.PrevPage}}</a>{{else}}<span class="disabled">{{.L.PrevPage}}</span>{{end}}
+		{{printf .L.PageNofM .UserPager.Page .UserPager.TotalPages}}
+		{{if .UserPager.NextURL}}<a href="{{.UserPager.NextURL}}">{{.L.NextPage}}</a>{{else}}<span class="disabled">{{.L.NextPage}}</span>{{end}}
 	</p>
 	{{end}}
 
-	<h2>添加用户</h2>
+	<h2>{{.L.H2Add}}</h2>
 	<form method="post" action="/user/create">
-		<label>用户名</label>
+		<label>{{.L.LabelUsername}}</label>
 		<input type="text" name="username" required autocomplete="username">
-		<label>密码</label>
+		<label>{{.L.LabelPassword}}</label>
 		<input type="password" name="password" required autocomplete="new-password">
-		<label>允许的远程转发端口（逗号分隔，例如 <span class="mono">8080,8443</span>）</label>
-		<textarea name="forward_ports" placeholder="8080,9000"></textarea>
-		<p class="hint">至少需要登记一个端口，该用户才能使用 <code>ssh -R</code>。</p>
-		<button type="submit">创建</button>
+		<label>{{.L.LabelFwdPortsAdd}}</label>
+		<textarea name="forward_ports" placeholder="{{.L.PlaceholderPorts}}"></textarea>
+		<p class="hint">{{.HintNeedPort}}</p>
+		<button type="submit">{{.L.Create}}</button>
 	</form>
 </body>
 </html>

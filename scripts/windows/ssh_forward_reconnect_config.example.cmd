@@ -1,47 +1,47 @@
 @echo off
-REM 复制本文件为 ssh_forward_reconnect_config.cmd 再修改。
-REM 不要提交 ssh_forward_reconnect_config.cmd（内含密码）。
+REM Copy this file to ssh_forward_reconnect_config.cmd and edit.
+REM Do not commit ssh_forward_reconnect_config.cmd (it may contain secrets).
 
-REM ========== SSH 登录 ==========
-set "SSH_HOST=你的服务器域名或IP"
+REM ========== SSH login ==========
+set "SSH_HOST=your.server.example.com"
 set "SSH_PORT=2222"
-set "SSH_USER=ssh用户名"
+set "SSH_USER=ssh_username"
 
-REM 使用密码自动重连：安装 PuTTY，并设置 SSH_PASS（明文，注意仅本机权限）。
-REM 若改用密钥，删除下行 SSH_PASS，并设置 SSH_KEY。
-REM 注意：脚本启用延迟变量展开，极个别符号可能导致密码异常，可改用 SSH_KEY。
-set "SSH_PASS=你的SSH密码"
+REM Password auto-reconnect: install PuTTY and set SSH_PASS (plaintext; keep file permissions tight).
+REM For key auth, remove SSH_PASS below and set SSH_KEY.
+REM Note: delayed expansion is enabled; rare characters in passwords may break; prefer SSH_KEY if needed.
+set "SSH_PASS=your_ssh_password"
 
-REM 私钥路径（留空 SSH_PASS 时生效）。需配合 ssh-copy-id 或已在服务端登记公钥。
+REM Private key path (used when SSH_PASS is empty). Use ssh-copy-id or register the pubkey on the server.
 REM set "SSH_KEY=%USERPROFILE%\.ssh\id_ed25519"
 
-REM plink.exe 路径；若在 PATH 中可直接写 plink
+REM Path to plink.exe; if plink is on PATH, you can use plink
 set "PLINK=C:\Program Files\PuTTY\plink.exe"
 
-REM 无人值守时建议填写服务端主机密钥，避免 plink -batch 因指纹变更失败。
-REM 获取指纹：首次手动 plink 或 ssh 连接后，在 PuTTY 缓存中查看，或查服务器文档。
+REM For unattended runs, set the server host key so plink -batch does not fail on fingerprint changes.
+REM Get fingerprint: first manual plink/ssh session, PuTTY cache, or server docs.
 REM set "SSH_HOSTKEY=ssh-ed25519:255:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
-REM ========== 转发模式 ==========
-REM MODE=R  远程转发（本 ssh_forward 服务仅支持此模式）
-REM MODE=L  一般 OpenSSH 本地转发；连接本服务时请固定 MODE=R，否则会遭服务端拒绝
+REM ========== Forward mode ==========
+REM MODE=R  Remote forward (default for this ssh_forward service)
+REM MODE=L  Typical OpenSSH local forward; use MODE=R with this service unless -allow-local-forward is enabled
 
 set "MODE=R"
 
-REM ---- MODE=R（对应 ssh -R）----
+REM ---- MODE=R (same as ssh -R) ----
 set "SERVER_BIND_PORT=8080"
 set "TARGET_HOST=127.0.0.1"
 set "TARGET_PORT=3000"
 
-REM ---- MODE=L（对应 ssh -L）----
+REM ---- MODE=L (same as ssh -L) ----
 REM set "MODE=L"
 REM set "LOCAL_BIND_PORT=9000"
-REM set "TARGET_HOST=内网或服务器能访问的主机"
+REM set "TARGET_HOST=host reachable from the server"
 REM set "TARGET_PORT=80"
 
-REM ========== 其它 ==========
-REM 断线后等待秒数再重连
+REM ========== Other ==========
+REM Seconds to wait after disconnect before reconnecting
 set "RECONNECT_SEC=5"
 
-REM OpenSSH 可选：接受新主机密钥（首次连接方便，生产请改为 yes 并预置 known_hosts）
+REM OpenSSH optional: accept new host keys (handy for first connect; use yes + known_hosts in production)
 set "SSH_STRICT_HOST_KEY=accept-new"
