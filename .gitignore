@@ -1,0 +1,6 @@
+/scripts/windows/ssh_forward_reconnect_config.cmd
+/data/
+*.exe
+ssh_forward
+.gitlab-ci.yml
+.DS_Store
