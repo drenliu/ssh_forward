@@ -15,7 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry) error {
+func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry, allowLocalForward bool) error {
 	signer, err := loadOrGenerateHostKey(hostKeyPath)
 	if err != nil {
 		return err
@@ -46,11 +46,11 @@ func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry) e
 		if err != nil {
 			return err
 		}
-		go handleTCP(c, cfg, st, reg)
+		go handleTCP(c, cfg, st, reg, allowLocalForward)
 	}
 }
 
-func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry.Registry) {
+func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry.Registry, allowLocalForward bool) {
 	connID := reg.NextConnID()
 	reg.TrackSession(connID, c)
 	defer reg.UntrackSession(connID)
@@ -77,26 +77,68 @@ func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry
 	fm := newForwardManager(reg, username, c, connID)
 
 	go handleGlobalRequests(reqs, conn, st, fm, c, username)
-	go handleChannels(chans)
+	go handleChannels(chans, allowLocalForward, reg, connID)
 
 	_ = conn.Wait()
 	fm.closeAll()
 }
 
-func handleChannels(chans <-chan ssh.NewChannel) {
+func handleChannels(chans <-chan ssh.NewChannel, allowLocalForward bool, reg *registry.Registry, connID int64) {
 	for newCh := range chans {
-		go handleNewChannel(newCh)
+		go handleNewChannel(newCh, allowLocalForward, reg, connID)
 	}
 }
 
-func handleNewChannel(newCh ssh.NewChannel) {
+func handleNewChannel(newCh ssh.NewChannel, allowLocalForward bool, reg *registry.Registry, connID int64) {
 	switch t := newCh.ChannelType(); t {
 	case "direct-tcpip":
-		// Local forwarding (-L): disabled — server must not dial arbitrary targets for clients.
-		newCh.Reject(ssh.Prohibited, "local forwarding (-L / direct-tcpip) is disabled")
+		if !allowLocalForward {
+			newCh.Reject(ssh.Prohibited, "local forwarding (-L / direct-tcpip) is disabled (use -allow-local-forward)")
+			return
+		}
+		var payload struct {
+			Host       string
+			Port       uint32
+			OriginAddr string
+			OriginPort uint32
+		}
+		if err := ssh.Unmarshal(newCh.ExtraData(), &payload); err != nil {
+			newCh.Reject(ssh.ConnectionFailed, "invalid direct-tcpip payload")
+			return
+		}
+		ch, reqs, err := newCh.Accept()
+		if err != nil {
+			return
+		}
+		go ssh.DiscardRequests(reqs)
+		go handleDirectTCPIP(ch, payload.Host, payload.Port, reg, connID)
 	default:
 		newCh.Reject(ssh.UnknownChannelType, fmt.Sprintf("channel type %q not supported", t))
 	}
+}
+
+func handleDirectTCPIP(ch ssh.Channel, host string, port uint32, reg *registry.Registry, connID int64) {
+	defer ch.Close()
+	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	tcpConn, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Printf("direct-tcpip dial %s: %v", addr, err)
+		return
+	}
+	tcpConn = &meteredConn{Conn: tcpConn, reg: reg, connID: connID}
+	defer tcpConn.Close()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(ch, tcpConn)
+		_ = ch.CloseWrite()
+	}()
+	go func() {
+		defer wg.Done()
+		_, _ = io.Copy(tcpConn, ch)
+	}()
+	wg.Wait()
 }
 
 type forwardManager struct {

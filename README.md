@@ -2,13 +2,13 @@
 
 中文文档：[README_CN.md](README_CN.md)
 
-A lightweight **SSH server** in **Go** that supports **remote TCP forwarding (`-R`)** only. Local forwarding (`-L` / `direct-tcpip`) is **disabled** so the server does not dial arbitrary destinations on behalf of clients. A **web admin UI** manages SSH accounts/passwords, **allowed remote forward ports** per user, and shows active `-R` listeners.
+A lightweight **SSH server** in **Go** that supports **remote TCP forwarding (`-R`)**. **Local forwarding (`-L` / `direct-tcpip`) is off by default** so the server does not dial arbitrary destinations unless you opt in with `-allow-local-forward`. A **web admin UI** manages SSH accounts/passwords, **allowed remote forward ports** per user, and shows active `-R` listeners.
 
 ## Features
 
 - **SSH**: Password authentication (bcrypt); host key generated on first run (Ed25519, under the data directory).
 - **Remote forwarding (`-R`)**: Listens only on ports you allow in the web UI; `tcpip-forward` is denied for unlisted ports.
-- **Local forwarding (`-L`)**: **Off** (`direct-tcpip` is rejected).
+- **Local forwarding (`-L`)**: **Off by default** (`direct-tcpip` is rejected). Enable with **`-allow-local-forward`** (the server will dial targets requested by the client).
 - **Web**: HTTP Basic auth; CRUD users and allowed ports; active `-R` list; `GET /api/active` (JSON).
 
 ## Requirements
@@ -33,6 +33,7 @@ go build -o ssh_forward .
 | `-http` | `127.0.0.1:8080` | Web admin listen address (localhost by default) |
 | `-web-user` | `admin` | Web Basic username |
 | `-web-pass` | (none) | Web Basic password (**required**) |
+| `-allow-local-forward` | `false` | Enable SSH local forwarding (`-L` / `direct-tcpip`); **dangerous** if untrusted clients can connect |
 
 Logs print the web URL and `-web-user`.
 
@@ -51,7 +52,13 @@ Expose `127.0.0.1:3000` on the client to port `8080` on the server (port `8080` 
 ssh -N -p 2222 -R 8080:127.0.0.1:3000 user@server
 ```
 
-`ssh -L` is **not supported** (the server rejects it by design).
+Local forward (`-L`) requires **`-allow-local-forward`** on the server. Example (listen on the client at `8080`, forward via the server to `127.0.0.1:3000` **as seen from the server**):
+
+```bash
+ssh -N -p 2222 -L 8080:127.0.0.1:3000 user@server
+```
+
+Without that flag, `direct-tcpip` is rejected.
 
 For first-time host key acceptance you may use `StrictHostKeyChecking=accept-new` (evaluate risk for your environment).
 
@@ -85,6 +92,7 @@ main.go       Entry point
 - Ports **below 1024** often need elevated privileges; prefer high ports.
 - Do not commit **`-web-pass`**, user passwords, or the host private key.
 - The web UI can show **plaintext** SSH passwords stored in SQLite alongside bcrypt hashes; protect **`app.db`** and the admin endpoint.
+- **`-allow-local-forward`** turns the SSH server into a generic TCP proxy from the client’s perspective; do not expose it to untrusted users without additional controls.
 
 ## License
 
