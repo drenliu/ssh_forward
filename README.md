@@ -2,13 +2,13 @@
 
 中文文档：[README_CN.md](README_CN.md)
 
-A lightweight **SSH server** in **Go** that supports **remote TCP forwarding (`-R`)**. **Local forwarding (`-L` / `direct-tcpip`) is off by default** so the server does not dial arbitrary destinations unless you opt in with `-allow-local-forward`. A **web admin UI** manages SSH accounts/passwords, **allowed remote forward ports** per user, and shows active `-R` listeners.
+A lightweight **SSH server** in **Go** that supports **remote TCP forwarding (`-R`)**. **Client-side TCP forwarding (`-L`, `-D` / `direct-tcpip`) is on by default** via **`-allow-dynamic-forward`** (default `true`); the server dials targets the client requests. Disable with **`-allow-dynamic-forward=false`** and leave **`-allow-local-forward`** off if you do not want that behavior. A **web admin UI** manages SSH accounts/passwords, **allowed remote forward ports** per user, and shows active `-R` listeners.
 
 ## Features
 
 - **SSH**: Password authentication (bcrypt); host key generated on first run (Ed25519, under the data directory).
 - **Remote forwarding (`-R`)**: Listens only on ports you allow in the web UI; `tcpip-forward` is denied for unlisted ports.
-- **Local forwarding (`-L`)**: **Off by default** (`direct-tcpip` is rejected). Enable with **`-allow-local-forward`** (the server will dial targets requested by the client).
+- **Local (`-L`) and dynamic (`-D`) forwarding**: **On by default** (`-allow-dynamic-forward` defaults to `true`; same `direct-tcpip` path for **`-L`** and SOCKS **`-D`**). Set **`-allow-dynamic-forward=false`** and do not set **`-allow-local-forward`** to reject `direct-tcpip`.
 - **Web**: HTTP Basic auth; CRUD users and allowed ports; active `-R` list; `GET /api/active` (JSON).
 
 ## Requirements
@@ -33,7 +33,8 @@ go build -o ssh_forward .
 | `-http` | `127.0.0.1:8080` | Web admin listen address (localhost by default) |
 | `-web-user` | `admin` | Web Basic username |
 | `-web-pass` | (none) | Web Basic password (**required**) |
-| `-allow-local-forward` | `false` | Enable SSH local forwarding (`-L` / `direct-tcpip`); **dangerous** if untrusted clients can connect |
+| `-allow-local-forward` | `false` | Enable SSH static local forwarding (`-L` / `direct-tcpip`); **dangerous** if untrusted clients can connect |
+| `-allow-dynamic-forward` | `true` | Enable SSH dynamic SOCKS forwarding (`-D` / same `direct-tcpip` path as `-L`); use `false` to disable unless `-allow-local-forward` is set; **dangerous** if untrusted clients can connect |
 
 Logs print the web URL and `-web-user`.
 
@@ -52,13 +53,21 @@ Expose `127.0.0.1:3000` on the client to port `8080` on the server (port `8080` 
 ssh -N -p 2222 -R 8080:127.0.0.1:3000 user@server
 ```
 
-Local forward (`-L`) requires **`-allow-local-forward`** on the server. Example (listen on the client at `8080`, forward via the server to `127.0.0.1:3000` **as seen from the server**):
+By default **`-allow-dynamic-forward`** is `true`, so **`-L`** and **`-D`** work without extra flags. Turn off with **`-allow-dynamic-forward=false`** (and omit **`-allow-local-forward`**) if you want `direct-tcpip` disabled.
+
+Static local forward — listen on the client at `8080`, forward via the server to `127.0.0.1:3000` **as seen from the server**:
 
 ```bash
 ssh -N -p 2222 -L 8080:127.0.0.1:3000 user@server
 ```
 
-Without that flag, `direct-tcpip` is rejected.
+Dynamic forward — SOCKS proxy on the client at `1080` (traffic exits **from the server** toward the target host):
+
+```bash
+ssh -N -p 2222 -D 1080 user@server
+```
+
+With **`-allow-dynamic-forward=false`** and **`-allow-local-forward`** not set, `direct-tcpip` is rejected.
 
 For first-time host key acceptance you may use `StrictHostKeyChecking=accept-new` (evaluate risk for your environment).
 
@@ -92,7 +101,7 @@ main.go       Entry point
 - Ports **below 1024** often need elevated privileges; prefer high ports.
 - Do not commit **`-web-pass`**, user passwords, or the host private key.
 - The web UI can show **plaintext** SSH passwords stored in SQLite alongside bcrypt hashes; protect **`app.db`** and the admin endpoint.
-- **`-allow-local-forward`** turns the SSH server into a generic TCP proxy from the client’s perspective; do not expose it to untrusted users without additional controls.
+- **`-allow-dynamic-forward`** defaults to **`true`**, so **`-L` / `-D`** behave like a generic TCP/SOCKS proxy unless you disable it; **`-allow-local-forward`** adds the same capability if dynamic is off. Do not expose SSH to untrusted users without additional controls.
 
 ## License
 

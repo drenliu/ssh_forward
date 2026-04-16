@@ -2,13 +2,13 @@
 
 English: [README.md](README.md)
 
-基于 **Go** 的轻量 **SSH 服务端**，支持 **远程 TCP 转发 (`-R`)**。**本地转发 `-L` / `direct-tcpip` 默认关闭**，避免服务端代拨任意目标；需要时可通过启动参数 **`-allow-local-forward`** 显式开启。带 **Web 管理界面**：维护 SSH 登录账号/密码，以及每个客户端允许使用的 **远程转发端口**，并在页面上查看当前活跃的 `-R` 监听。
+基于 **Go** 的轻量 **SSH 服务端**，支持 **远程 TCP 转发 (`-R`)**。**客户端侧 TCP 转发（`-L`、`-D` / `direct-tcpip`）默认开启**（**`-allow-dynamic-forward`** 默认为 `true`，服务端会按客户端请求代拨目标）。若不需要该能力，请使用 **`-allow-dynamic-forward=false`** 且不要开启 **`-allow-local-forward`**。带 **Web 管理界面**：维护 SSH 登录账号/密码，以及每个客户端允许使用的 **远程转发端口**，并在页面上查看当前活跃的 `-R` 监听。
 
 ## 功能概览
 
 - **SSH**：密码认证（bcrypt 存储）；主机密钥首次运行自动生成（Ed25519，保存在数据目录）。
 - **远程转发 (`-R`)**：仅在 Web 中为该用户登记的端口上监听；未配置端口则拒绝 `tcpip-forward`。
-- **本地转发 (`-L`)**：**默认关闭**（拒绝 `direct-tcpip`）；使用 **`-allow-local-forward`** 可开启（服务端会按客户端请求代拨 TCP）。
+- **本地 (`-L`) 与动态 (`-D`) 转发**：**默认开启**（`-allow-dynamic-forward` 默认为 `true`；`-L` 与 SOCKS **`-D`** 共用 `direct-tcpip`）。若需关闭，使用 **`-allow-dynamic-forward=false`** 且勿开启 **`-allow-local-forward`**。
 - **Web**：HTTP Basic 认证；用户增删改、维护「允许的远程转发端口」列表；展示当前 `-R` 监听及 API `GET /api/active`（JSON）。
 
 ## 环境要求
@@ -33,7 +33,8 @@ go build -o ssh_forward .
 | `-http` | `127.0.0.1:8080` | Web 管理监听地址（默认仅本机） |
 | `-web-user` | `admin` | Web Basic 用户名 |
 | `-web-pass` | （无） | Web Basic 密码，**必填** |
-| `-allow-local-forward` | `false` | 开启 SSH 本地转发（`-L` / `direct-tcpip`）；不可信客户端可连时**风险高** |
+| `-allow-local-forward` | `false` | 开启 SSH 静态本地转发（`-L` / `direct-tcpip`）；不可信客户端可连时**风险高** |
+| `-allow-dynamic-forward` | `true` | 开启 SSH 动态 SOCKS 转发（`-D`，与 `-L` 共用 `direct-tcpip`）；传 `false` 可关闭（除非同时开启 `-allow-local-forward`）；不可信客户端可连时**风险高** |
 
 日志中会打印 Web 访问地址与 `-web-user`。
 
@@ -52,12 +53,18 @@ go build -o ssh_forward .
 ssh -N -p 2222 -R 8080:127.0.0.1:3000 用户名@服务器地址
 ```
 
-默认情况下 `ssh -L` 会被拒绝。若服务端以 **`-allow-local-forward`** 启动，则支持 `-L`（服务端会向客户端指定的主机/端口发起连接，请充分评估风险）。
+默认 **`-allow-dynamic-forward=true`**，故 **`ssh -L` / `ssh -D` 默认可用**。若已关闭动态转发且未开启 **`-allow-local-forward`**，则 `direct-tcpip` 会被拒绝。
 
-示例（在客户端监听 `8080`，经服务端转发到服务端视角下的 `127.0.0.1:3000`）：
+本地转发示例（在客户端监听 `8080`，经服务端转发到服务端视角下的 `127.0.0.1:3000`）：
 
 ```bash
 ssh -N -p 2222 -L 8080:127.0.0.1:3000 用户名@服务器地址
+```
+
+动态转发示例（在客户端开 SOCKS `1080`，访问目标由 SOCKS 指定，**从服务端侧**向目标发起连接）：
+
+```bash
+ssh -N -p 2222 -D 1080 用户名@服务器地址
 ```
 
 首次连接若需自动接受主机密钥，可酌情使用 `StrictHostKeyChecking=accept-new`（请自行评估安全策略）。
@@ -92,4 +99,4 @@ main.go       入口
 - 绑定 **1024 以下** 特权端口通常需要更高权限；优先使用高端口。
 - **不要**在仓库或日志中泄露 `-web-pass`、用户密码或主机私钥。
 - Web 列表展示依赖在 SQLite 中 **明文保存** 的 SSH 密码副本（与 bcrypt 哈希并存）；请严格保护 `app.db` 与管理入口。
-- 开启 **`-allow-local-forward`** 后，已认证客户端可让服务端连接其指定的目标，勿对不可信用户开放，除非另有网络或策略约束。
+- **`-allow-dynamic-forward`** 默认为 **`true`**，已认证客户端可通过 **`-L` / `-D`** 让服务端代拨目标（含 SOCKS）；若关闭动态转发且未开 **`-allow-local-forward`** 则无此能力。勿对不可信用户开放 SSH，除非另有网络或策略约束。

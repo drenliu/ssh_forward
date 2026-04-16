@@ -150,7 +150,7 @@ func localeFor(lang string) uiLocale {
 			HTMLLang:     "en",
 			Title:        "SSH forward admin",
 			Heading:      "SSH TCP forwarding",
-			HintMainHTML: `This service supports <strong>remote forwarding</strong> <code>ssh -R</code> only by default (local <code>-L</code> requires <code>-allow-local-forward</code> on the server). The <strong>allowed remote forward ports</strong> below are the server listen ports in <code>-R port:host:hostport</code> and must match what you configure here.`,
+			HintMainHTML: `The <strong>allowed remote forward ports</strong> below apply to <code>ssh -R</code> (server listen ports in <code>-R port:host:hostport</code>); they must match what you configure here. Client <code>-L</code> and SOCKS <code>-D</code> use <code>direct-tcpip</code>; <code>-allow-dynamic-forward</code> defaults to <strong>on</strong> (set <code>false</code> and omit <code>-allow-local-forward</code> to disable).`,
 			HintWarnHTML: `Passwords in the list are stored <strong>in plaintext</strong> in the database for convenience. Do not expose the admin UI to the internet; do not commit <code>app.db</code>.`,
 
 			ErrUnknown:        "Something went wrong (code: %s).",
@@ -222,7 +222,7 @@ func localeFor(lang string) uiLocale {
 		HTMLLang:     "zh-CN",
 		Title:        "SSH 转发管理",
 		Heading:      "SSH 端口转发服务",
-		HintMainHTML: `本服务<strong>默认仅支持</strong>远程转发 <code>ssh -R</code>（本地 <code>-L</code> 需服务端开启 <code>-allow-local-forward</code>）。下方「允许的远程转发端口」即 <code>-R 端口:目标:目标端口</code> 中服务端监听端口，须与此处登记一致。`,
+		HintMainHTML: `下方「允许的远程转发端口」用于 <code>ssh -R</code>（即 <code>-R 端口:目标:目标端口</code> 中的服务端监听端口，须与此处登记一致）。客户端 <code>-L</code> 与 SOCKS <code>-D</code> 走 <code>direct-tcpip</code>；<code>-allow-dynamic-forward</code> 默认<strong>开启</strong>（若需关闭可设为 <code>false</code> 且勿开启 <code>-allow-local-forward</code>）。`,
 		HintWarnHTML: `列表中的密码以<strong>明文</strong>写入数据库便于查看；请勿对公网暴露管理页，勿提交 <code>app.db</code>。`,
 
 		ErrUnknown:        "操作未完成（错误代码：%s）",

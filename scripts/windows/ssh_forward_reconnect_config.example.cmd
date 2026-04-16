@@ -24,7 +24,7 @@ REM set "SSH_HOSTKEY=ssh-ed25519:255:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 REM ========== Forward mode ==========
 REM MODE=R  Remote forward (default for this ssh_forward service)
-REM MODE=L  Typical OpenSSH local forward; use MODE=R with this service unless -allow-local-forward is enabled
+REM MODE=L  Typical OpenSSH local forward; this service allows -L/-D by default (-allow-dynamic-forward defaults true). Use MODE=R only for remote forward to the server.
 
 set "MODE=R"
 

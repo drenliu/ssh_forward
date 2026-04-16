@@ -15,7 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry, allowLocalForward bool) error {
+func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry, allowDirectTCPIP bool) error {
 	signer, err := loadOrGenerateHostKey(hostKeyPath)
 	if err != nil {
 		return err
@@ -46,11 +46,11 @@ func Listen(addr, hostKeyPath string, st *store.Store, reg *registry.Registry, a
 		if err != nil {
 			return err
 		}
-		go handleTCP(c, cfg, st, reg, allowLocalForward)
+		go handleTCP(c, cfg, st, reg, allowDirectTCPIP)
 	}
 }
 
-func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry.Registry, allowLocalForward bool) {
+func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry.Registry, allowDirectTCPIP bool) {
 	connID := reg.NextConnID()
 	reg.TrackSession(connID, c)
 	defer reg.UntrackSession(connID)
@@ -77,23 +77,23 @@ func handleTCP(c net.Conn, cfg *ssh.ServerConfig, st *store.Store, reg *registry
 	fm := newForwardManager(reg, username, c, connID)
 
 	go handleGlobalRequests(reqs, conn, st, fm, c, username)
-	go handleChannels(chans, allowLocalForward, reg, connID)
+	go handleChannels(chans, allowDirectTCPIP, reg, connID)
 
 	_ = conn.Wait()
 	fm.closeAll()
 }
 
-func handleChannels(chans <-chan ssh.NewChannel, allowLocalForward bool, reg *registry.Registry, connID int64) {
+func handleChannels(chans <-chan ssh.NewChannel, allowDirectTCPIP bool, reg *registry.Registry, connID int64) {
 	for newCh := range chans {
-		go handleNewChannel(newCh, allowLocalForward, reg, connID)
+		go handleNewChannel(newCh, allowDirectTCPIP, reg, connID)
 	}
 }
 
-func handleNewChannel(newCh ssh.NewChannel, allowLocalForward bool, reg *registry.Registry, connID int64) {
+func handleNewChannel(newCh ssh.NewChannel, allowDirectTCPIP bool, reg *registry.Registry, connID int64) {
 	switch t := newCh.ChannelType(); t {
 	case "direct-tcpip":
-		if !allowLocalForward {
-			newCh.Reject(ssh.Prohibited, "local forwarding (-L / direct-tcpip) is disabled (use -allow-local-forward)")
+		if !allowDirectTCPIP {
+			newCh.Reject(ssh.Prohibited, "client TCP forwarding (-L / -D / direct-tcpip) is disabled (use -allow-local-forward=true or -allow-dynamic-forward=true; dynamic forward defaults to on)")
 			return
 		}
 		var payload struct {

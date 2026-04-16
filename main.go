@@ -18,8 +18,10 @@ func main() {
 	httpAddr := flag.String("http", "127.0.0.1:8080", "web admin listen address")
 	webUser := flag.String("web-user", "admin", "HTTP Basic user for web admin")
 	webPass := flag.String("web-pass", "", "HTTP Basic password (required)")
-	allowLocalForward := flag.Bool("allow-local-forward", false, "enable SSH local forwarding (-L / direct-tcpip); off by default")
+	allowLocalForward := flag.Bool("allow-local-forward", false, "enable SSH static local forwarding (-L / direct-tcpip); off by default")
+	allowDynamicForward := flag.Bool("allow-dynamic-forward", true, "enable SSH dynamic SOCKS forwarding (-D / uses direct-tcpip); on by default (set false to disable)")
 	flag.Parse()
+	allowDirectTCPIP := *allowLocalForward || *allowDynamicForward
 
 	if *webPass == "" {
 		log.Fatal("set -web-pass for the web admin UI (HTTP Basic)")
@@ -46,7 +48,7 @@ func main() {
 	}()
 
 	log.Printf("web admin http://%s (user %q)", *httpAddr, *webUser)
-	if err := sshd.Listen(*sshAddr, hostKeyPath, st, reg, *allowLocalForward); err != nil {
+	if err := sshd.Listen(*sshAddr, hostKeyPath, st, reg, allowDirectTCPIP); err != nil {
 		log.Fatal(err)
 	}
 }
